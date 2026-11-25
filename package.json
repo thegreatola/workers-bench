@@ -4,7 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run --config vitest.unit.config.ts",
+    "bench": "tsx src/bench.ts",
+    "report": "tsx src/report.ts",
+    "check-tasks": "tsx src/check-tasks.ts",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
