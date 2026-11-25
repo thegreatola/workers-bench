@@ -8,7 +8,8 @@
     "bench": "tsx src/bench.ts",
     "report": "tsx src/report.ts",
     "check-tasks": "tsx src/check-tasks.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "regrade": "tsx src/regrade.ts"
   },
   "keywords": [],
   "author": "",
