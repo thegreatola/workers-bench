@@ -62,14 +62,18 @@ npm test                                  # unit tests, offline
 
 ## Results so far
 
+Baseline tier:
+
 | Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
 |---|---|---|---|---|---|
 | Haiku | Cloudflare docs search | 20/20 | 94/94 | 12 s | 0 |
 | Haiku | no docs | 20/20 | 94/94 | 13 s | – |
 
-The baseline tier, above. The smallest model solves every task with or without docs, and never searches the docs. These tasks cover well-documented, widely used APIs, so they can't tell models apart or show what documentation is worth.
+The smallest model solves every task with or without docs, and never searches the docs. These tasks cover well-documented, widely used APIs, so they can't tell models apart or show what documentation is worth.
 
-The hard tier:
+One grading bug was found this way: Haiku put its `cache.put` in `ctx.waitUntil`, a correct pattern that the cache test read too early. The test now waits for the write, and `regrade` rescored the run.
+
+Hard tier:
 
 | Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
 |---|---|---|---|---|---|
@@ -77,8 +81,6 @@ The hard tier:
 | Haiku | no docs | 7/7 | 28/28 | 13 s | – |
 
 Haiku also solves every hard task without docs. With docs it searched 4 times, once each on the two Workflow tasks, Secrets Store and `ctx.exports`, and those searches didn't change any score. So far, the newer APIs are already known well enough to write from a clear spec. Two of the no-docs attempts first failed before the agent started, because Claude Code reported "not logged in" during parallel starts. They were run again, and the runner now retries that case once.
-
-One grading bug was found this way: Haiku put its `cache.put` in `ctx.waitUntil`, a correct pattern that the cache test read too early. The test now waits for the write, and `regrade` rescored the run.
 
 ## Status
 
