@@ -110,7 +110,7 @@ What the runs show:
 
 ### What went wrong in the benchmark
 
-Ten "failures" across these runs were the benchmark's fault, not the models'. Each was fixed, and the affected code was regraded or the task was re-run:
+Seventeen "failures" across these runs were the benchmark's fault, not the models'. Each was fixed, and the affected code was regraded or the task was re-run:
 
 - **Cache (14):** the test read the cache before a `waitUntil` write had landed.
 - **Link shortener (34):** the test demanded explicit acks, but a queue handler that returns cleanly acks its batch.
