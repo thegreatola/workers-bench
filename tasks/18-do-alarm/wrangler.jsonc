@@ -1,0 +1,3 @@
+{ "name": "task", "main": "src/index.ts", "compatibility_date": "2026-11-01",
+  "durable_objects": { "bindings": [{ "name": "REMINDERS", "class_name": "Reminder" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Reminder"] }] }

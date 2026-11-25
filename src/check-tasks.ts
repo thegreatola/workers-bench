@@ -8,8 +8,8 @@ import path from "node:path";
 import { grade, ROOT, TASKS } from "./grade.js";
 
 const EMPTY = `export default { async fetch() { return new Response("not implemented", { status: 501 }); } };\n`;
-const only = process.argv[2];
-const tasks = (await readdir(TASKS)).filter((t) => !only || t.includes(only)).sort();
+const only = process.argv.slice(2);
+const tasks = (await readdir(TASKS)).filter((t) => !only.length || only.some((o) => t.startsWith(o))).sort();
 let bad = 0;
 for (const t of tasks) {
   const ref = await readFile(path.join(TASKS, t, "reference.ts"), "utf8");

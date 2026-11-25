@@ -5,4 +5,3 @@ The `X-Signature` header is `sha256=` followed by the lowercase hex HMAC-SHA256 
 - Signature valid and body is JSON: return 200 with `{"received": true, "event": <the body's "event" field>}`.
 - Signature missing or wrong: return 401 with `{"error": "invalid signature"}`. Check the signature before parsing the body.
 - Signature valid but body not JSON: return 400.
-- Compare signatures in constant time.
