@@ -82,9 +82,20 @@ Hard tier:
 
 Haiku also solves every hard task without docs. With docs it searched 4 times, once each on the two Workflow tasks, Secrets Store and `ctx.exports`, and those searches didn't change any score. So far, the newer APIs are already known well enough to write from a clear spec. Two of the no-docs attempts first failed before the agent started, because Claude Code reported "not logged in" during parallel starts. They were run again, and the runner now retries that case once.
 
+Sonnet and Opus, all 27 tasks:
+
+| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
+|---|---|---|---|---|---|
+| Opus | Cloudflare docs search | 27/27 | 122/122 | 21 s | 0 |
+| Opus | no docs | 27/27 | 122/122 | 22 s | – |
+| Sonnet | Cloudflare docs search | 27/27 | 122/122 | 11 s | 0 |
+| Sonnet | no docs | 27/27 | 122/122 | 12 s | – |
+
+Every model solves every task in both conditions. Sonnet and Opus never searched the docs; Opus took about twice as long as Sonnet. So with a clear spec and the bindings in hand, all three models already write correct Workers for every API here, newer ones included. The benchmark doesn't separate them yet, and the docs question needs harder tasks to answer.
+
 ## Status
 
-The harness and both tiers are done, and Haiku has run on all 27 tasks. Next: Sonnet and Opus runs, then tasks that are harder in shape rather than API age, such as specs with several interacting parts or a vague requirement the agent must resolve from the docs.
+The harness and both tiers are done, and Haiku, Sonnet and Opus have each run on all 27 tasks: 162 of 162 attempts solved. Next: tasks that are harder in shape rather than API age, such as specs with several interacting parts, a requirement the agent must resolve from the docs, or a limit only the docs state.
 
 ## License
 
