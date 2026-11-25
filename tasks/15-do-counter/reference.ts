@@ -1,9 +1,21 @@
 import { DurableObject } from "cloudflare:workers";
 interface Env { COUNTER: DurableObjectNamespace<Counter> }
 export class Counter extends DurableObject<Env> {
-  async value(): Promise<number> { return (await this.ctx.storage.get<number>("value")) ?? 0; }
-  async add(by: number): Promise<number> { const v = (await this.value()) + by; await this.ctx.storage.put("value", v); return v; }
-  async reset(): Promise<number> { await this.ctx.storage.put("value", 0); return 0; }
+  // One synchronous SQL statement per change: atomic, with no await between read and write.
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS counter (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL)");
+  }
+  async value(): Promise<number> {
+    return this.ctx.storage.sql.exec<{ value: number }>("SELECT value FROM counter WHERE id = 1").toArray()[0]?.value ?? 0;
+  }
+  async add(by: number): Promise<number> {
+    return this.ctx.storage.sql.exec<{ value: number }>("INSERT INTO counter (id, value) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value = value + excluded.value RETURNING value", by).one().value;
+  }
+  async reset(): Promise<number> {
+    this.ctx.storage.sql.exec("INSERT INTO counter (id, value) VALUES (1, 0) ON CONFLICT(id) DO UPDATE SET value = 0");
+    return 0;
+  }
 }
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {

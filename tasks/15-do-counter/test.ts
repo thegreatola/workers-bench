@@ -25,7 +25,8 @@ it("bad by is 400", async () => {
   for (const b of ["abc", "1.5", ""]) expect((await f(`/counter/b/increment?by=${b}`, "POST")).status, b).toBe(400);
 });
 it("concurrent increments are not lost", async () => {
-  await Promise.all(Array.from({ length: 40 }, () => f("/counter/busy/increment", "POST")));
+  const rs = await Promise.all(Array.from({ length: 40 }, () => f("/counter/busy/increment", "POST")));
+  expect(rs.map((r) => r.status)).toEqual(Array(40).fill(200));
   expect(((await (await f("/counter/busy")).json()) as any).value).toBe(40);
 });
 it("the count lives in durable storage", async () => {

@@ -120,7 +120,7 @@ Seventeen "failures" across these runs were the benchmark's fault, not the model
 
 Both the alarm and range bugs surfaced only when Fable 5.2 wrote more careful code than the tests expected.
 
-`check-tasks` once flagged a task under heavy machine load and passed on every rerun. The concurrency traps (29, 31) rely on a race that a loaded machine can occasionally miss. That affects the self-check only, never an agent's score.
+CI's first run caught a flaky reference: task 15's counter did an async read-then-write and lost one of 40 concurrent increments on a Linux runner. The reference now uses one atomic SQL statement, and the test also checks that every request succeeded. The concurrency traps (29, 31) rely on a race that a loaded machine can occasionally miss, which affects the self-check only, never an agent's score.
 
 ## Status
 
