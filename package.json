@@ -11,7 +11,13 @@
     "typecheck": "tsc --noEmit",
     "regrade": "tsx src/regrade.ts"
   },
-  "keywords": [],
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "benchmark",
+    "ai-agents",
+    "evals"
+  ],
   "author": "",
   "license": "MIT",
   "type": "module",
@@ -32,5 +38,12 @@
     "esbuild@0.28.2": true,
     "workerd@1.20260815.1": true,
     "workerd@1.20261123.1": true
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thegreatola/workers-bench.git"
   }
 }

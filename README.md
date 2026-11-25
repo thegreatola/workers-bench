@@ -83,7 +83,7 @@ npm run check-tasks                       # every reference passes, every empty 
 npm run bench -- --models haiku,sonnet,opus --conditions none,docs --concurrency 4
 npm run report -- <run id>
 npm run regrade -- <run id>               # score saved code again after a test fix, no model calls
-npm test                                  # unit tests, offline
+npm test                                  # unit tests, offline (CI also runs check-tasks)
 ```
 
 `--tasks 01,15` runs a subset. `--run <name>` names the run folder.
