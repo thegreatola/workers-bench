@@ -8,8 +8,8 @@
  *      and a stub src/index.ts. The hidden tests are never in it.
  *   2. Claude Code, headless, writes src/index.ts with file tools only.
  *      Condition "docs" also gives it Cloudflare's documentation search.
- *      Condition "run" lets it write its own tests and run them with `npm test`
- *      in workerd; Bash is allowed for that one command and nothing else.
+ *      Condition "run" lets it write its own tests and run them in workerd with
+ *      one MCP tool, run_tests (src/test-mcp.ts). It gets no shell.
  *      The "fix-" conditions start from the task's naive.ts, a plausible but
  *      buggy Worker, and ask the agent to find and fix the bugs.
  *   3. The file is graded against the hidden tests inside workerd.
@@ -33,8 +33,11 @@ export type Condition = keyof typeof CONDITIONS;
 const DOCS_MCP = { mcpServers: { "cloudflare-docs": { type: "http", url: "https://docs.mcp.cloudflare.com/mcp" } } };
 const DOCS_TOOLS = ["mcp__cloudflare-docs__search_cloudflare_documentation", "mcp__cloudflare-docs__migrate_pages_to_workers_guide"];
 const FILE_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"];
-/** Bash, limited by Claude Code's permission rules to running the workspace's tests. */
-export const RUN_ALLOWED = ["Bash(npm test)", "Bash(npm test:*)"];
+/** The "run" conditions' only way to execute code: one MCP tool that runs the workspace's tests. */
+export const RUN_TOOL = "mcp__bench__run_tests";
+function runMcp(work: string) {
+  return { mcpServers: { bench: { type: "stdio", command: path.join(ROOT, "node_modules", ".bin", "tsx"), args: [path.join(ROOT, "src", "test-mcp.ts"), work] } } };
+}
 
 const STUB = `export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -46,7 +49,7 @@ const STUB = `export default {
 const BASE = `You write Cloudflare Workers in TypeScript (ES module syntax).
 The task is in TASK.md and the Worker's bindings are in wrangler.jsonc. The complete Worker lives in src/index.ts: every handler, and every class the bindings name, exported from that one file.`;
 const NO_RUN = `\nYou can't run, build or test code here, so get it right by reading carefully.`;
-const RUN = `\nYou can test your work: write Vitest tests in test/*.test.ts and run them with \`npm test\`, which runs them inside workerd, the Workers runtime, with the bindings from wrangler.jsonc. test/example.test.ts shows how a test calls the Worker. Bash is limited to \`npm test\`.`;
+const RUN = `\nYou can test your work: write Vitest tests in test/*.test.ts and run them with the run_tests tool, which runs them inside workerd, the Workers runtime, with the bindings from wrangler.jsonc. test/example.test.ts shows how a test calls the Worker. There is no shell.`;
 const WRITE_TASK = `\nWrite src/index.ts. When it is finished, reply with one sentence saying what you built.`;
 const FIX_TASK = `\nsrc/index.ts was written for TASK.md, but users report that it doesn't always do what TASK.md says. Find and fix every bug, keeping what already works. When it is fixed, reply with one sentence saying what was wrong.`;
 const DOCS_NOTE = `\nYou can search Cloudflare's developer documentation with the search_cloudflare_documentation tool.`;
@@ -92,9 +95,9 @@ export interface Attempt extends Grade {
   inputTokens: number;
   outputTokens: number;
   docSearches: number;
-  /** Times the agent ran `npm test` (conditions that allow it). */
+  /** Times the agent called run_tests (the "run" conditions). */
   testRuns: number;
-  /** Bash commands Claude Code refused (anything other than npm test). */
+  /** Tool calls Claude Code refused for lack of permission. */
   blockedCommands: number;
   agentError?: string;
 }
@@ -129,12 +132,11 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
       systemPrompt: systemPrompt(condition),
       model,
       schema: SCHEMA,
-      tools: k.run ? [...FILE_TOOLS, "Bash"] : FILE_TOOLS,
-      ...(k.run ? { allowedRules: RUN_ALLOWED } : {}),
+      tools: FILE_TOOLS,
       cwd: work,
       timeoutMs: 600_000,
       logPath: path.join(out, "trace.jsonl"),
-      ...(docs ? { mcpConfig: DOCS_MCP, mcpTools: DOCS_TOOLS } : {}),
+      ...mcpFor(docs, k.run, work),
     };
     const r = await runner.run(spec);
     const code = await readFile(path.join(work, "src", "index.ts"), "utf8");
@@ -152,7 +154,7 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
       docSearches: r.toolCalls.filter((c) => c.name.startsWith("mcp__cloudflare-docs__")).length,
-      testRuns: r.toolCalls.filter((c) => c.name === "Bash" && /^\s*npm test\b/.test(String((c.input as any)?.command ?? ""))).length,
+      testRuns: r.toolCalls.filter((c) => c.name === RUN_TOOL).length,
       blockedCommands: r.denied ?? 0,
       ...(r.error ? { agentError: r.error } : {}),
     };
@@ -161,6 +163,12 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
   } finally {
     await rm(work, { recursive: true, force: true });
   }
+}
+
+function mcpFor(docs: boolean, run: boolean, work: string): Pick<AgentSpec, "mcpConfig" | "mcpTools"> {
+  if (!docs && !run) return {};
+  const servers = { ...(docs ? DOCS_MCP.mcpServers : {}), ...(run ? runMcp(work).mcpServers : {}) };
+  return { mcpConfig: { mcpServers: servers }, mcpTools: [...(docs ? DOCS_TOOLS : []), ...(run ? [RUN_TOOL] : [])] };
 }
 
 /** Grading folders must sit inside this repo so the test runtime resolves from its node_modules. */

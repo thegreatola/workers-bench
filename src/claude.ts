@@ -31,8 +31,6 @@ export interface AgentSpec {
   logPath?: string;
   /** MCP servers for this agent, as Claude Code's --mcp-config JSON. Their tools must also be listed in mcpTools. */
   mcpConfig?: object;
-  /** Extra permission rules for --allowedTools, e.g. ["Bash(npm test)"]. A tool in `tools` but not covered by a rule is denied, since nothing can approve it. */
-  allowedRules?: string[];
   /** MCP tool names to allow, e.g. ["mcp__cloudflare-docs__search_cloudflare_documentation"]. */
   mcpTools?: string[];
 }
@@ -73,8 +71,7 @@ export class ClaudeCodeRunner implements AgentRunner {
         "--output-format", "stream-json",
         "--verbose",
       ];
-      const ruled = new Set((spec.allowedRules ?? []).map((r) => r.replace(/\(.*$/, "")));
-      const allowed = [...spec.tools.filter((t) => !ruled.has(t)), ...(spec.allowedRules ?? []), ...(spec.mcpTools ?? [])].join(",");
+      const allowed = [...spec.tools, ...(spec.mcpTools ?? [])].join(",");
       if (allowed) args.push("--allowedTools", allowed);
       if (spec.mcpConfig) args.push("--mcp-config", JSON.stringify(spec.mcpConfig));
       const { stdout, stderr, code } = await runProcess(BIN(), args, cwd, spec.timeoutMs ?? 300_000);

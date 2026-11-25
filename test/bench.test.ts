@@ -60,7 +60,7 @@ describe("attempt", () => {
 });
 
 describe("run and fix conditions", () => {
-  it("run: the workspace can test itself, and Bash is limited to npm test", async () => {
+  it("run: the workspace can test itself through run_tests, with no shell", async () => {
     const r = new FakeRunner(null, "skip");
     let files: string[] = [];
     const orig = r.run.bind(r);
@@ -71,9 +71,9 @@ describe("run and fix conditions", () => {
     };
     await attempt(r, await mkdtemp(path.join(os.tmpdir(), "wb-test-")), "01-json-methods", "fake", "run");
     expect(files).toEqual(["TASK.md", "node_modules", "package.json", "src", "test", "vitest.config.ts", "wrangler.jsonc"]);
-    expect(r.seen[0].tools).toContain("Bash");
-    expect(r.seen[0].allowedRules).toEqual(["Bash(npm test)", "Bash(npm test:*)"]);
-    expect(systemPrompt("run")).toContain("npm test");
+    expect(r.seen[0].tools).not.toContain("Bash");
+    expect(r.seen[0].mcpTools).toEqual(["mcp__bench__run_tests"]);
+    expect(systemPrompt("run")).toContain("run_tests");
     expect(systemPrompt("none")).toContain("can't run");
   });
   it("fix: starts from the task's naive.ts", async () => {
@@ -89,6 +89,22 @@ describe("run and fix conditions", () => {
     expect(a.solved).toBe(false);
     expect(a.passed).toBeGreaterThan(0);
   });
+});
+
+it("run_tests runs the workspace's tests and reports failures", async () => {
+  const { runTests } = await import("../src/test-mcp.js");
+  const { ROOT } = await import("../src/grade.js");
+  const work = await mkdtemp(path.join(ROOT, ".grade", "mcp-"));
+  const { mkdir, symlink } = await import("node:fs/promises");
+  await mkdir(path.join(work, "src")); await mkdir(path.join(work, "test"));
+  await writeFile(path.join(work, "wrangler.jsonc"), '{ "name": "t", "main": "src/index.ts", "compatibility_date": "2026-11-01" }');
+  await writeFile(path.join(work, "vitest.config.ts"), 'import { cloudflareTest } from "@cloudflare/vitest-plugin";\nimport { defineConfig } from "vitest/config";\nexport default defineConfig({ plugins: [cloudflareTest({ wrangler: { configPath: "./wrangler.jsonc" } })] });\n');
+  await writeFile(path.join(work, "src", "index.ts"), 'export default { async fetch() { return new Response("hi"); } };');
+  await writeFile(path.join(work, "test", "a.test.ts"), 'import { exports } from "cloudflare:workers";\nimport { it, expect } from "vitest";\nit("says hi", async () => { expect(await (await exports.default.fetch("http://x/")).text()).toBe("hi"); });\nit("is wrong on purpose", async () => { expect(1).toBe(2); });\n');
+  const r = await runTests(work);
+  expect(r.passed).toBe(false);
+  expect(r.text).toMatch(/1 passed/);
+  expect(r.text).toMatch(/1 failed/);
 });
 
 describe("report", () => {
