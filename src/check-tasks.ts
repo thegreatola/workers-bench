@@ -15,9 +15,13 @@ for (const t of tasks) {
   const ref = await readFile(path.join(TASKS, t, "reference.ts"), "utf8");
   const a = await grade(t, ref, path.join(ROOT, ".grade", t, "reference"));
   const b = await grade(t, emptyFor(ref), path.join(ROOT, ".grade", t, "empty"));
-  const ok = a.solved && b.passed === 0;
+  // A naive.ts, where present, is the plausible-but-wrong version the task is built to catch: it must fail.
+  const naivePath = path.join(TASKS, t, "naive.ts");
+  const naive = await readFile(naivePath, "utf8").catch(() => null);
+  const c = naive === null ? null : await grade(t, naive, path.join(ROOT, ".grade", t, "naive"));
+  const ok = a.solved && b.passed === 0 && (c === null || !c.solved);
   if (!ok) bad++;
-  console.log(`${ok ? "ok  " : "FAIL"} ${t}  reference ${a.passed}/${a.total}  empty ${b.passed}/${b.total}`);
+  console.log(`${ok ? "ok  " : "FAIL"} ${t}  reference ${a.passed}/${a.total}  empty ${b.passed}/${b.total}${c ? `  naive ${c.passed}/${c.total}` : ""}`);
   if (a.error) console.log("     reference error:", a.error);
   for (const c of a.cases.filter((c) => !c.passed)) console.log(`     reference failed: ${c.name}: ${c.message}`);
   for (const c of b.cases.filter((c) => c.passed)) console.log(`     empty passed: ${c.name}`);

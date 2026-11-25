@@ -1,0 +1,3 @@
+{ "name": "task", "main": "src/index.ts", "compatibility_date": "2026-11-01",
+  "durable_objects": { "bindings": [{ "name": "SCHEDULER", "class_name": "Scheduler" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Scheduler"] }] }

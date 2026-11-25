@@ -1,0 +1,4 @@
+{ "name": "task", "main": "src/index.ts", "compatibility_date": "2026-11-01",
+  "queues": { "producers": [{ "binding": "DLQ", "queue": "emails-dlq" }],
+              "consumers": [{ "queue": "emails", "max_batch_timeout": 1 }, { "queue": "emails-dlq", "max_batch_timeout": 1 }] },
+  "kv_namespaces": [{ "binding": "SENT", "id": "sent" }, { "binding": "DEAD", "id": "dead" }] }
