@@ -1,0 +1,6 @@
+{ "name": "task", "main": "src/index.ts", "compatibility_date": "2026-11-01",
+  "kv_namespaces": [{ "binding": "LINKS", "id": "links" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "clicks", "database_id": "local" }],
+  "queues": { "producers": [{ "binding": "CLICKS", "queue": "clicks" }],
+              "consumers": [{ "queue": "clicks", "max_batch_size": 100, "max_batch_timeout": 1 }] },
+  "vars": { "ADMIN_TOKEN": "bench-admin-token" } }

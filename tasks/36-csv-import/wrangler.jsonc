@@ -1,0 +1,2 @@
+{ "name": "task", "main": "src/index.ts", "compatibility_date": "2026-11-01",
+  "d1_databases": [{ "binding": "DB", "database_name": "catalogue", "database_id": "local" }] }
