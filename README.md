@@ -6,7 +6,7 @@ Each task is a short spec for a Worker, with the bindings it gets in `wrangler.j
 
 ## Tasks
 
-27 tasks, each with hidden tests and a reference solution, in two tiers.
+33 tasks, each with hidden tests and a reference solution, in three tiers.
 
 **Baseline (01–20):** well-known Workers APIs.
 
@@ -30,6 +30,19 @@ Each task is a short spec for a Worker, with the bindings it gets in `wrangler.j
 | 27 ctx-exports | `ctx.exports` loopback entrypoints with `ctx.props` |
 
 The Workflow tests use the Vitest plugin's workflow introspection: they disable sleeps, mock events, force timeouts and inject step failures. A task can ship extra files (the static site in 24) from `tasks/<task>/files/`.
+
+**Tricky (28–33):** ordinary APIs with a planted trap. Each task ships `naive.ts`, a plausible solution that falls into the trap, and `check-tasks` requires it to fail.
+
+| Task | The trap |
+|---|---|
+| 28 rewrite-split-text | HTMLRewriter hands over text in chunks, so the word can be split across two |
+| 29 d1-transfer | A transfer to a missing account loses money; concurrent transfers can overdraw |
+| 30 do-scheduler | One alarm for many reminders: it must re-arm, and an early run delivers nothing |
+| 31 idempotency | A burst of 30 identical retries must make exactly one payment |
+| 32 jwt-verify | `alg: none`, HS256 key confusion, clock skew, `aud` arrays, base64url |
+| 33 queue-retry-dlq | Per-message retry delays, a dead-letter queue, two queues in one handler |
+
+The JWT task's keys are throwaway keys made for the test. The two concurrency traps (29, 31) were checked three times each: the naive version failed every time and the reference never did.
 
 A task's spec states only what its tests check. `npm run check-tasks` proves each task is sound: its reference solution must pass every test, and an empty Worker must pass none.
 
@@ -93,9 +106,22 @@ Sonnet and Opus, all 27 tasks:
 
 Every model solves every task in both conditions. Sonnet and Opus never searched the docs; Opus took about twice as long as Sonnet. So with a clear spec and the bindings in hand, all three models already write correct Workers for every API here, newer ones included. The benchmark doesn't separate them yet, and the docs question needs harder tasks to answer.
 
+Tricky tier, all three models:
+
+| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
+|---|---|---|---|---|---|
+| Opus | Cloudflare docs search | 6/6 | 28/28 | 31 s | 0 |
+| Opus | no docs | 6/6 | 28/28 | 28 s | – |
+| Sonnet | Cloudflare docs search | 6/6 | 28/28 | 16 s | 0 |
+| Sonnet | no docs | 6/6 | 28/28 | 19 s | – |
+| Haiku | Cloudflare docs search | 6/6 | 28/28 | 34 s | 1 |
+| Haiku | no docs | 5/6 | 27/28 | 25 s | – |
+
+The first miss in the benchmark: Haiku without docs stored the whole message under `sent:<id>` in task 33, where the spec asks for the address. That's a slip in reading the spec, not an API question, and one miss in 36 is too few to say the docs helped. Every model avoided every planted trap.
+
 ## Status
 
-The harness and both tiers are done, and Haiku, Sonnet and Opus have each run on all 27 tasks: 162 of 162 attempts solved. Next: tasks that are harder in shape rather than API age, such as specs with several interacting parts, a requirement the agent must resolve from the docs, or a limit only the docs state.
+Three tiers and 33 tasks are done, and Haiku, Sonnet and Opus have each run on all of them: 197 of 198 attempts solved. A clear spec with its bindings is enough for current models on everything here, traps included. To find where they break, the next tasks should take away what makes these easy: a vague spec, several files and services, a limit only the docs state, or letting the agent run code and measuring how it debugs.
 
 ## License
 
