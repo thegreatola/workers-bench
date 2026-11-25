@@ -6,7 +6,9 @@ Each task is a short spec for a Worker, with the bindings it gets in `wrangler.j
 
 ## Tasks
 
-20 tasks, each with hidden tests and a reference solution:
+27 tasks, each with hidden tests and a reference solution, in two tiers.
+
+**Baseline (01–20):** well-known Workers APIs.
 
 | | Tasks |
 |---|---|
@@ -14,6 +16,20 @@ Each task is a short spec for a Worker, with the bindings it gets in `wrangler.j
 | Storage | KV (CRUD and TTL, listing past one page, `waitUntil` counters), R2 (files and ETags, range requests), D1 |
 | Background | Cron triggers, Queues (producer, consumer, per-message retry) |
 | Durable Objects | Counters, rate limiting, RPC with SQLite storage, alarms, WebSocket hibernation |
+
+**Hard (21–27):** newer Workers APIs, where a model's training data is thinnest and the docs should matter most.
+
+| Task | API |
+|---|---|
+| 21 workflow-order | Workflows: named steps, retries with backoff, sleeps |
+| 22 workflow-approval | Workflows: `waitForEvent` with a timeout, events sent from `fetch` |
+| 23 secrets-store | Secrets Store bindings (`await env.API_KEY.get()`) |
+| 24 static-assets | Workers Static Assets with `run_worker_first` and the `ASSETS` binding |
+| 25 ws-auto-response | WebSocket hibernation auto-response and socket attachments |
+| 26 rpc-target | `RpcTarget` objects returned over a service binding |
+| 27 ctx-exports | `ctx.exports` loopback entrypoints with `ctx.props` |
+
+The Workflow tests use the Vitest plugin's workflow introspection: they disable sleeps, mock events, force timeouts and inject step failures. A task can ship extra files (the static site in 24) from `tasks/<task>/files/`.
 
 A task's spec states only what its tests check. `npm run check-tasks` proves each task is sound: its reference solution must pass every test, and an empty Worker must pass none.
 
@@ -51,13 +67,22 @@ npm test                                  # unit tests, offline
 | Haiku | Cloudflare docs search | 20/20 | 94/94 | 12 s | 0 |
 | Haiku | no docs | 20/20 | 94/94 | 13 s | – |
 
-The smallest model solves every task with or without docs, and never searches the docs. These 20 tasks cover APIs that are well documented and widely used, so they can't tell models apart or show what documentation is worth. They stay as the baseline tier.
+The baseline tier, above. The smallest model solves every task with or without docs, and never searches the docs. These tasks cover well-documented, widely used APIs, so they can't tell models apart or show what documentation is worth.
+
+The hard tier:
+
+| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
+|---|---|---|---|---|---|
+| Haiku | Cloudflare docs search | 7/7 | 28/28 | 15 s | 4 |
+| Haiku | no docs | 7/7 | 28/28 | 13 s | – |
+
+Haiku also solves every hard task without docs. With docs it searched 4 times, once each on the two Workflow tasks, Secrets Store and `ctx.exports`, and those searches didn't change any score. So far, the newer APIs are already known well enough to write from a clear spec. Two of the no-docs attempts first failed before the agent started, because Claude Code reported "not logged in" during parallel starts. They were run again, and the runner now retries that case once.
 
 One grading bug was found this way: Haiku put its `cache.put` in `ctx.waitUntil`, a correct pattern that the cache test read too early. The test now waits for the write, and `regrade` rescored the run.
 
 ## Status
 
-The harness, the 20 baseline tasks and the first run are done. Next is a harder tier built on newer Workers APIs, where a model's training data is thinnest and the docs should matter most.
+The harness and both tiers are done, and Haiku has run on all 27 tasks. Next: Sonnet and Opus runs, then tasks that are harder in shape rather than API age, such as specs with several interacting parts or a vague requirement the agent must resolve from the docs.
 
 ## License
 
