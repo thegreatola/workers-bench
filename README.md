@@ -55,7 +55,12 @@ task spec + wrangler.jsonc ──> agent (Claude Code, headless) ──> src/ind
 ```
 
 - **The agent** is Claude Code in headless mode, in a fresh temp folder holding only `TASK.md`, `wrangler.jsonc` and a stub `src/index.ts`. Its tools are Read, Write, Edit, Glob and Grep, confined to that folder. It can't run code, so a score measures writing a working Worker from the spec.
-- **Two conditions:** `none` has no outside help. `docs` adds Cloudflare's documentation MCP server (`docs.mcp.cloudflare.com`), and the run counts how often the agent searches it.
+- **Conditions:**
+  - `none` has no outside help.
+  - `docs` adds Cloudflare's documentation MCP server (`docs.mcp.cloudflare.com`), and the run counts how often the agent searches it.
+  - `run` lets the agent write its own Vitest tests and run them in workerd with one tool, `run_tests`. The run counts how often it does.
+  - `fix-none` and `fix-run` start the agent from a tricky task's `naive.ts`, the buggy version, and ask it to find and fix the bugs, without and with `run_tests`.
+- **No shell.** `run_tests` comes from a small MCP server in this repo (`src/test-mcp.ts`) that takes no input and runs one fixed command. The first version gave the agent Bash limited to `npm test` by a permission rule. A probe showed that isn't a hard wall: `whoami` and `npm test && echo …` both ran. So the agent gets no Bash at all.
 - **Output** goes to `runs/<run id>/`: each attempt's code, its stream-json trace (which [agent-trace-viewer](https://github.com/thegreatola/agent-trace-viewer) opens), and `results.json`. `npm run report` turns that into a leaderboard and a task-by-task grid.
 
 ## Run it
@@ -119,9 +124,22 @@ Tricky tier, all three models:
 
 The first miss in the benchmark: Haiku without docs stored the whole message under `sent:<id>` in task 33, where the spec asks for the address. That's a slip in reading the spec, not an API question, and one miss in 36 is too few to say the docs helped. Every model avoided every planted trap.
 
+Fixing the tricky tier's buggy Workers, all three models:
+
+| Model | Condition | Tasks fixed | Tests passed | Median time | Test runs |
+|---|---|---|---|---|---|
+| Opus | can't run code | 6/6 | 28/28 | 28 s | – |
+| Opus | can run its own tests | 6/6 | 28/28 | 44 s | 7 |
+| Sonnet | can't run code | 6/6 | 28/28 | 16 s | – |
+| Sonnet | can run its own tests | 6/6 | 28/28 | 15 s | 0 |
+| Haiku | can't run code | 6/6 | 28/28 | 22 s | – |
+| Haiku | can run its own tests | 6/6 | 28/28 | 26 s | 9 |
+
+Every model found and fixed every planted bug just by reading the code against the spec, with or without the chance to run tests. When it could, Haiku ran tests 9 times across the 6 tasks and Opus 7 times, which made Opus slower without changing a score. Sonnet never ran a test. Running code doesn't separate these models on these tasks either.
+
 ## Status
 
-Three tiers and 33 tasks are done, and Haiku, Sonnet and Opus have each run on all of them: 197 of 198 attempts solved. A clear spec with its bindings is enough for current models on everything here, traps included. To find where they break, the next tasks should take away what makes these easy: a vague spec, several files and services, a limit only the docs state, or letting the agent run code and measuring how it debugs.
+Three tiers, 33 tasks and five conditions are done. Haiku, Sonnet and Opus have run every task, and fixed every buggy Worker with and without running tests: 233 of 234 attempts solved. A single-file Worker with a clear spec, or a buggy one next to its spec, is within reach of all three models, traps included. To find where they break, the next tasks should be bigger and less specified: several files and services, a vague requirement, or a limit only the docs state.
 
 ## License
 
