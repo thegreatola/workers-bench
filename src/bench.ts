@@ -145,7 +145,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const runner = new ClaudeCodeRunner();
   let done = 0;
   const attempts = await pool(jobs, concurrency, async ({ m, c, t }) => {
-    const a = await attempt(runner, runDir, t, m, c);
+    let a = await attempt(runner, runDir, t, m, c);
+    // Parallel Claude Code starts sometimes report "Not logged in" before the agent runs. That is setup, not the model: try once more.
+    if (a.error === "the agent wrote no code" && /not logged in/i.test(a.agentError ?? "")) a = await attempt(runner, runDir, t, m, c);
     done++;
     const mark = a.solved ? "pass" : a.error || a.agentError ? "ERR " : "fail";
     console.log(`[${String(done).padStart(3)}/${jobs.length}] ${mark} ${m.padEnd(7)} ${c.padEnd(5)} ${t.padEnd(18)} ${a.passed}/${a.total}  ${(a.durationMs / 1000).toFixed(0)}s${a.docSearches ? `  ${a.docSearches} doc searches` : ""}${a.agentError ? `  agent: ${a.agentError.slice(0, 80)}` : a.error ? `  ${a.error.split("\n")[0].slice(0, 80)}` : ""}`);
