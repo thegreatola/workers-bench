@@ -41,6 +41,7 @@ export async function grade(task: string, code: string, dir: string, timeoutMs =
   await mkdir(path.join(dir, "src"), { recursive: true });
   await mkdir(path.join(dir, "test"), { recursive: true });
   await cp(path.join(TASKS, task, "wrangler.jsonc"), path.join(dir, "wrangler.jsonc"));
+  await copyTaskFiles(task, dir);
   await cp(path.join(TASKS, task, "test.ts"), path.join(dir, "test", "index.test.ts"));
   await writeFile(path.join(dir, "src", "index.ts"), code);
   await writeFile(path.join(dir, "vitest.config.ts"), VITEST_CONFIG);
@@ -65,6 +66,12 @@ export async function grade(task: string, code: string, dir: string, timeoutMs =
   const fileError = (report.testResults ?? []).map((f: any) => f.message).find((m: string) => m);
   if (total === 0) return { task, passed: 0, total: 0, solved: false, cases, error: firstLine(fileError) ?? tail(stderr || stdout) };
   return { task, passed, total, solved: passed === total, cases };
+}
+
+/** Extra files a task ships (e.g. a static site in public/), from tasks/<task>/files/. */
+export async function copyTaskFiles(task: string, dir: string): Promise<void> {
+  const src = path.join(TASKS, task, "files");
+  try { await cp(src, dir, { recursive: true }); } catch (e: any) { if (e.code !== "ENOENT") throw e; }
 }
 
 function firstLine(s?: string): string | undefined {

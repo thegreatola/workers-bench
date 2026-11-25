@@ -1,0 +1,2 @@
+{ "name": "task", "main": "src/index.ts", "compatibility_date": "2026-11-01",
+  "secrets_store_secrets": [{ "binding": "API_KEY", "store_id": "bench-store", "secret_name": "api-key" }] }

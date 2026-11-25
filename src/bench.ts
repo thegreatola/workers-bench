@@ -16,7 +16,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/pr
 import os from "node:os";
 import path from "node:path";
 import { ClaudeCodeRunner, type AgentRunner, type AgentSpec } from "./claude.js";
-import { grade, ROOT, TASKS, type Grade } from "./grade.js";
+import { copyTaskFiles, grade, ROOT, TASKS, type Grade } from "./grade.js";
 
 export const CONDITIONS = {
   none: { label: "no docs", docs: false },
@@ -64,6 +64,7 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
     await mkdir(path.join(work, "src"));
     await cp(path.join(TASKS, task, "task.md"), path.join(work, "TASK.md"));
     await cp(path.join(TASKS, task, "wrangler.jsonc"), path.join(work, "wrangler.jsonc"));
+    await copyTaskFiles(task, work);
     await writeFile(path.join(work, "src", "index.ts"), STUB);
 
     const docs = CONDITIONS[condition].docs;
