@@ -37,8 +37,15 @@ it("end past the last byte is clamped", async () => {
   expect(r.headers.get("content-range")).toBe("bytes 18-19/20");
   expect(await r.text()).toBe("ij");
 });
+it("an unknown range unit may be ignored or refused", async () => {
+  // RFC 9110 lets a server ignore a Range header in a unit it doesn't support.
+  const r = await get("items=0-1");
+  expect([200, 416], "items=0-1").toContain(r.status);
+  if (r.status === 200) expect(await r.text()).toBe(DATA);
+  else expect(r.headers.get("content-range")).toBe("bytes */20");
+});
 it("unsatisfiable or malformed is 416", async () => {
-  for (const h of ["bytes=20-", "bytes=25-30", "bytes=5-2", "items=0-1", "bytes=abc"]) {
+  for (const h of ["bytes=20-", "bytes=25-30", "bytes=5-2", "bytes=abc"]) {
     const r = await get(h);
     expect(r.status, h).toBe(416);
     expect(r.headers.get("content-range"), h).toBe("bytes */20");
