@@ -6,7 +6,7 @@ Each task is a short spec for a Worker, with the bindings it gets in `wrangler.j
 
 ## Tasks
 
-33 tasks, each with hidden tests and a reference solution, in three tiers.
+36 tasks, each with hidden tests and a reference solution, in four tiers.
 
 **Baseline (01–20):** well-known Workers APIs.
 
@@ -41,6 +41,16 @@ The Workflow tests use the Vitest plugin's workflow introspection: they disable 
 | 31 idempotency | A burst of 30 identical retries must make exactly one payment |
 | 32 jwt-verify | `alg: none`, HS256 key confusion, clock skew, `aud` arrays, base64url |
 | 33 queue-retry-dlq | Per-message retry delays, a dead-letter queue, two queues in one handler |
+
+**Systems (34–36):** product-sized specs across several bindings, each with a platform limit that is in Cloudflare's docs but not in the spec. The local runtime enforces these limits, so breaking one fails the test.
+
+| Task | Built on | The limit the spec doesn't mention |
+|---|---|---|
+| 34 link-shortener | KV, D1, a queue, an admin token | D1 takes at most 100 bound parameters, so a 100-click batch can't be one multi-row INSERT |
+| 35 bookmarks | KV keyed by URL | KV keys are at most 512 bytes, and the URLs run to 4,000 characters |
+| 36 csv-import | D1 | The same parameter limit at 2,000 rows, plus RFC 4180 quoting, exact cents and an all-or-nothing import |
+
+Agents may split their code across several files in `src/`; the whole folder is saved and graded.
 
 The JWT task's keys are throwaway keys made for the test. The two concurrency traps (29, 31) were checked three times each: the naive version failed every time and the reference never did.
 
@@ -80,66 +90,41 @@ npm test                                  # unit tests, offline
 
 ## Results so far
 
-Baseline tier:
+Four models: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.2 (asked for by full id; Claude Code's short name `fable` gives Fable 5.1, so each result records the model that answered). Every model ran every task with and without docs, and every buggy Worker with and without `run_tests`.
 
-| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
+| Model | Attempts solved | Write, no docs | Write, docs | Fix, no tests | Fix, can test |
 |---|---|---|---|---|---|
-| Haiku | Cloudflare docs search | 20/20 | 94/94 | 12 s | 0 |
-| Haiku | no docs | 20/20 | 94/94 | 13 s | – |
+| Fable 5.2 | 84/84 | 36/36 | 36/36 | 6/6 | 6/6 |
+| Opus 5.5 | 84/84 | 36/36 | 36/36 | 6/6 | 6/6 |
+| Sonnet 5.5 | 84/84 | 36/36 | 36/36 | 6/6 | 6/6 |
+| Haiku 5.5 | 83/84 | 35/36 | 36/36 | 6/6 | 6/6 |
 
-The smallest model solves every task with or without docs, and never searches the docs. These tasks cover well-documented, widely used APIs, so they can't tell models apart or show what documentation is worth.
+335 of 336 attempts solved. The one miss is Haiku without docs on task 33: it stored the whole message under `sent:<id>` where the spec asks for the address, a slip in reading the spec.
 
-One grading bug was found this way: Haiku put its `cache.put` in `ctx.waitUntil`, a correct pattern that the cache test read too early. The test now waits for the write, and `regrade` rescored the run.
+What the runs show:
 
-Hard tier:
+- **A clear spec is enough.** Every model wrote correct Workers for every API here, the newest ones included. They avoided every planted trap and every hidden platform limit, and found every planted bug by reading alone.
+- **Docs were barely used.** Across all runs with the docs tool, the agents searched it a handful of times, almost all Haiku, and no search changed a score.
+- **Running tests didn't change scores.** Fable, Haiku and Opus ran tests when they could, but Sonnet never did. Everything was fixed either way.
+- **Speed differs, quality doesn't.** Sonnet is consistently the fastest, at a median of 10 to 25 s a task. Opus and Fable usually take about twice as long.
 
-| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
-|---|---|---|---|---|---|
-| Haiku | Cloudflare docs search | 7/7 | 28/28 | 15 s | 4 |
-| Haiku | no docs | 7/7 | 28/28 | 13 s | – |
+### What went wrong in the benchmark
 
-Haiku also solves every hard task without docs. With docs it searched 4 times, once each on the two Workflow tasks, Secrets Store and `ctx.exports`, and those searches didn't change any score. So far, the newer APIs are already known well enough to write from a clear spec. Two of the no-docs attempts first failed before the agent started, because Claude Code reported "not logged in" during parallel starts. They were run again, and the runner now retries that case once.
+Ten "failures" across these runs were the benchmark's fault, not the models'. Each was fixed, and the affected code was regraded or the task was re-run:
 
-Sonnet and Opus, all 27 tasks:
+- **Cache (14):** the test read the cache before a `waitUntil` write had landed.
+- **Link shortener (34):** the test demanded explicit acks, but a queue handler that returns cleanly acks its batch.
+- **CSV import (36):** the spec's line-number rule could be read two ways. The wording was fixed, and the task was re-run for every model.
+- **Alarm (18):** the test fired the alarm minutes early. Fable's handler rightly refused to deliver before the due time.
+- **R2 range (20):** RFC 9110 lets a server ignore a Range header in an unknown unit, but the test demanded 416.
 
-| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
-|---|---|---|---|---|---|
-| Opus | Cloudflare docs search | 27/27 | 122/122 | 21 s | 0 |
-| Opus | no docs | 27/27 | 122/122 | 22 s | – |
-| Sonnet | Cloudflare docs search | 27/27 | 122/122 | 11 s | 0 |
-| Sonnet | no docs | 27/27 | 122/122 | 12 s | – |
+Both the alarm and range bugs surfaced only when Fable 5.2 wrote more careful code than the tests expected.
 
-Every model solves every task in both conditions. Sonnet and Opus never searched the docs; Opus took about twice as long as Sonnet. So with a clear spec and the bindings in hand, all three models already write correct Workers for every API here, newer ones included. The benchmark doesn't separate them yet, and the docs question needs harder tasks to answer.
-
-Tricky tier, all three models:
-
-| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |
-|---|---|---|---|---|---|
-| Opus | Cloudflare docs search | 6/6 | 28/28 | 31 s | 0 |
-| Opus | no docs | 6/6 | 28/28 | 28 s | – |
-| Sonnet | Cloudflare docs search | 6/6 | 28/28 | 16 s | 0 |
-| Sonnet | no docs | 6/6 | 28/28 | 19 s | – |
-| Haiku | Cloudflare docs search | 6/6 | 28/28 | 34 s | 1 |
-| Haiku | no docs | 5/6 | 27/28 | 25 s | – |
-
-The first miss in the benchmark: Haiku without docs stored the whole message under `sent:<id>` in task 33, where the spec asks for the address. That's a slip in reading the spec, not an API question, and one miss in 36 is too few to say the docs helped. Every model avoided every planted trap.
-
-Fixing the tricky tier's buggy Workers, all three models:
-
-| Model | Condition | Tasks fixed | Tests passed | Median time | Test runs |
-|---|---|---|---|---|---|
-| Opus | can't run code | 6/6 | 28/28 | 28 s | – |
-| Opus | can run its own tests | 6/6 | 28/28 | 44 s | 7 |
-| Sonnet | can't run code | 6/6 | 28/28 | 16 s | – |
-| Sonnet | can run its own tests | 6/6 | 28/28 | 15 s | 0 |
-| Haiku | can't run code | 6/6 | 28/28 | 22 s | – |
-| Haiku | can run its own tests | 6/6 | 28/28 | 26 s | 9 |
-
-Every model found and fixed every planted bug just by reading the code against the spec, with or without the chance to run tests. When it could, Haiku ran tests 9 times across the 6 tasks and Opus 7 times, which made Opus slower without changing a score. Sonnet never ran a test. Running code doesn't separate these models on these tasks either.
+`check-tasks` once flagged a task under heavy machine load and passed on every rerun. The concurrency traps (29, 31) rely on a race that a loaded machine can occasionally miss. That affects the self-check only, never an agent's score.
 
 ## Status
 
-Three tiers, 33 tasks and five conditions are done. Haiku, Sonnet and Opus have run every task, and fixed every buggy Worker with and without running tests: 233 of 234 attempts solved. A single-file Worker with a clear spec, or a buggy one next to its spec, is within reach of all three models, traps included. To find where they break, the next tasks should be bigger and less specified: several files and services, a vague requirement, or a limit only the docs state.
+Four tiers, 36 tasks and five conditions, run with four models: 335 of 336 attempts solved. For a single Worker with a clear spec, even one across several bindings with hidden limits, current models no longer separate. A benchmark that ranks them needs work that is open-ended rather than specified: building from a vague brief, changing an existing multi-file codebase, or longer tasks where a misread early decision has to be noticed and undone.
 
 ## License
 
