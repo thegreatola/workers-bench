@@ -8,7 +8,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Attempt } from "./bench.js";
 import { pool } from "./bench.js";
-import { grade, ROOT } from "./grade.js";
+import { grade, readSrc, ROOT } from "./grade.js";
 
 const id = process.argv[2];
 if (!id) throw new Error("usage: npm run regrade -- <run id>");
@@ -18,7 +18,8 @@ const data = JSON.parse(await readFile(file, "utf8")) as { attempts: Attempt[] }
 let changed = 0;
 data.attempts = await pool(data.attempts, 4, async (a) => {
   const out = path.join(dir, a.condition, a.model, a.task);
-  const code = await readFile(path.join(out, "index.ts"), "utf8").catch(() => null);
+  const src = await readSrc(path.join(out, "src")).catch(() => null);
+  const code = src && Object.keys(src).length ? src : await readFile(path.join(out, "index.ts"), "utf8").catch(() => null);
   if (code === null || a.error === "the agent wrote no code") return a;
   const g = await grade(a.task, code, path.join(ROOT, ".grade", "regrade", id, a.condition, a.model, a.task));
   const next: Attempt = { ...a, ...g };

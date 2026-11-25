@@ -19,7 +19,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "n
 import os from "node:os";
 import path from "node:path";
 import { ClaudeCodeRunner, type AgentRunner, type AgentSpec } from "./claude.js";
-import { copyTaskFiles, grade, ROOT, TASKS, type Grade } from "./grade.js";
+import { copyTaskFiles, grade, readSrc, ROOT, TASKS, type Grade } from "./grade.js";
 
 export const CONDITIONS = {
   none: { label: "no docs", docs: false, run: false, fix: false },
@@ -47,10 +47,10 @@ const STUB = `export default {
 `;
 
 const BASE = `You write Cloudflare Workers in TypeScript (ES module syntax).
-The task is in TASK.md and the Worker's bindings are in wrangler.jsonc. The complete Worker lives in src/index.ts: every handler, and every class the bindings name, exported from that one file.`;
+The task is in TASK.md and the Worker's bindings are in wrangler.jsonc. The Worker's entry point is src/index.ts, which exports every handler and every class the bindings name. You may split the code into more files under src/.`;
 const NO_RUN = `\nYou can't run, build or test code here, so get it right by reading carefully.`;
 const RUN = `\nYou can test your work: write Vitest tests in test/*.test.ts and run them with the run_tests tool, which runs them inside workerd, the Workers runtime, with the bindings from wrangler.jsonc. test/example.test.ts shows how a test calls the Worker. There is no shell.`;
-const WRITE_TASK = `\nWrite src/index.ts. When it is finished, reply with one sentence saying what you built.`;
+const WRITE_TASK = `\nWrite the Worker. When it is finished, reply with one sentence saying what you built.`;
 const FIX_TASK = `\nsrc/index.ts was written for TASK.md, but users report that it doesn't always do what TASK.md says. Find and fix every bug, keeping what already works. When it is fixed, reply with one sentence saying what was wrong.`;
 const DOCS_NOTE = `\nYou can search Cloudflare's developer documentation with the search_cloudflare_documentation tool.`;
 
@@ -99,6 +99,10 @@ export interface Attempt extends Grade {
   testRuns: number;
   /** Tool calls Claude Code refused for lack of permission. */
   blockedCommands: number;
+  /** The models Claude Code reports having used, which can differ from the name asked for. */
+  modelsUsed?: string[];
+  /** How many source files the agent left in src/. */
+  srcFiles?: number;
   agentError?: string;
 }
 
@@ -139,12 +143,17 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
       ...mcpFor(docs, k.run, work),
     };
     const r = await runner.run(spec);
-    const code = await readFile(path.join(work, "src", "index.ts"), "utf8");
+    const files = await readSrc(path.join(work, "src"));
+    const code = files["index.ts"] ?? "";
     await writeFile(path.join(out, "index.ts"), code);
+    for (const [rel, text] of Object.entries(files)) {
+      await mkdir(path.dirname(path.join(out, "src", rel)), { recursive: true });
+      await writeFile(path.join(out, "src", rel), text);
+    }
 
     const g: Grade = r.error && code === start && !k.fix
       ? { task, passed: 0, total: 0, solved: false, cases: [], error: "the agent wrote no code" }
-      : await grade(task, code, gradeDir(out));
+      : await grade(task, files, gradeDir(out));
     const result: Attempt = {
       ...g,
       model,
@@ -156,6 +165,8 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
       docSearches: r.toolCalls.filter((c) => c.name.startsWith("mcp__cloudflare-docs__")).length,
       testRuns: r.toolCalls.filter((c) => c.name === RUN_TOOL).length,
       blockedCommands: r.denied ?? 0,
+      modelsUsed: r.modelsUsed ?? [],
+      srcFiles: Object.keys(files).length,
       ...(r.error ? { agentError: r.error } : {}),
     };
     await writeFile(path.join(out, "result.json"), JSON.stringify(result, null, 2) + "\n");

@@ -4,13 +4,13 @@
  *
  * A grading folder is laid out like a small Worker project:
  *   wrangler.jsonc       the task's bindings
- *   src/index.ts         the code under test
+ *   src/index.ts         the code under test (plus any other files the agent wrote in src/)
  *   test/index.test.ts   the task's hidden tests
  *   vitest.config.ts
  * It lives inside this repo so the plugin resolves from node_modules.
  */
 import { spawn } from "node:child_process";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const ROOT = path.resolve(import.meta.dirname, "..");
@@ -36,14 +36,23 @@ export interface Grade {
   error?: string;
 }
 
-export async function grade(task: string, code: string, dir: string, timeoutMs = 120_000): Promise<Grade> {
+/** The code under test: src/index.ts's text, or every file of src/ by its path inside src/. */
+export type Code = string | Record<string, string>;
+
+export async function grade(task: string, code: Code, dir: string, timeoutMs = 120_000): Promise<Grade> {
   await rm(dir, { recursive: true, force: true });
   await mkdir(path.join(dir, "src"), { recursive: true });
   await mkdir(path.join(dir, "test"), { recursive: true });
   await cp(path.join(TASKS, task, "wrangler.jsonc"), path.join(dir, "wrangler.jsonc"));
   await copyTaskFiles(task, dir);
   await cp(path.join(TASKS, task, "test.ts"), path.join(dir, "test", "index.test.ts"));
-  await writeFile(path.join(dir, "src", "index.ts"), code);
+  const files = typeof code === "string" ? { "index.ts": code } : code;
+  for (const [rel, text] of Object.entries(files)) {
+    const to = path.resolve(dir, "src", rel);
+    if (!to.startsWith(path.join(dir, "src") + path.sep)) throw new Error(`file outside src/: ${rel}`);
+    await mkdir(path.dirname(to), { recursive: true });
+    await writeFile(to, text);
+  }
   await writeFile(path.join(dir, "vitest.config.ts"), VITEST_CONFIG);
 
   const out = path.join(dir, "result.json");
@@ -72,6 +81,17 @@ export async function grade(task: string, code: string, dir: string, timeoutMs =
 export async function copyTaskFiles(task: string, dir: string): Promise<void> {
   const src = path.join(TASKS, task, "files");
   try { await cp(src, dir, { recursive: true }); } catch (e: any) { if (e.code !== "ENOENT") throw e; }
+}
+
+/** Reads every source file under a src/ folder, keyed by its path inside it. */
+export async function readSrc(srcDir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const rel of (await readdir(srcDir, { recursive: true })).map(String).sort()) {
+    if (!/\.(ts|tsx|js|mjs|json)$/.test(rel)) continue;
+    const st = await stat(path.join(srcDir, rel));
+    if (st.isFile() && st.size < 1_000_000) out[rel] = await readFile(path.join(srcDir, rel), "utf8");
+  }
+  return out;
 }
 
 function firstLine(s?: string): string | undefined {

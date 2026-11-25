@@ -50,6 +50,22 @@ describe("attempt", () => {
     expect(r.seen[1].mcpTools).toContain("mcp__cloudflare-docs__search_cloudflare_documentation");
     expect(r.seen.every((s) => s.tools.every((t) => ["Read", "Write", "Edit", "Glob", "Grep"].includes(t)))).toBe(true);
   });
+  it("grades code split across several files in src/", async () => {
+    const run = await mkdtemp(path.join(os.tmpdir(), "wb-test-"));
+    const r = new FakeRunner(null);
+    const orig = r.run.bind(r);
+    r.run = async (spec) => {
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(path.join(spec.cwd!, "src", "lib"), { recursive: true });
+      await writeFile(path.join(spec.cwd!, "src", "lib", "body.ts"), 'export const body = (path: string) => JSON.stringify({ status: "ok", path });\n');
+      await writeFile(path.join(spec.cwd!, "src", "index.ts"), 'import { body } from "./lib/body";\nexport default { async fetch(req: Request) {\n  if (req.method !== "GET" && req.method !== "HEAD") return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });\n  return new Response(req.method === "HEAD" ? null : body(new URL(req.url).pathname), { headers: { "Content-Type": "application/json" } });\n} };\n');
+      return orig(spec);
+    };
+    const a = await attempt(r, run, "01-json-methods", "fake", "none");
+    expect(a.solved).toBe(true);
+    expect(a.srcFiles).toBe(2);
+    expect(await readFile(path.join(run, "none", "fake", "01-json-methods", "src", "lib", "body.ts"), "utf8")).toContain("status");
+  });
   it("code that doesn't load scores zero with a reason", async () => {
     const run = await mkdtemp(path.join(os.tmpdir(), "wb-test-"));
     const a = await attempt(new FakeRunner("export default {{{ nope"), run, "01-json-methods", "fake", "none");

@@ -44,6 +44,8 @@ export interface AgentResult {
   toolCalls: { name: string; input: unknown }[];
   /** Tool calls Claude Code refused for lack of permission. */
   denied?: number;
+  /** Model ids from the result's modelUsage: what actually answered. */
+  modelsUsed?: string[];
   error?: string;
 }
 
@@ -110,6 +112,7 @@ export function parseStream(stdout: string): AgentResult & { tools: string[] } {
       r.inputTokens = (e.usage?.input_tokens ?? 0) + (e.usage?.cache_read_input_tokens ?? 0) + (e.usage?.cache_creation_input_tokens ?? 0);
       r.outputTokens = e.usage?.output_tokens ?? 0;
       r.denied = Array.isArray(e.permission_denials) ? e.permission_denials.length : 0;
+      r.modelsUsed = Object.keys(e.modelUsage ?? {});
       if (e.is_error) r.error = String(e.result ?? e.subtype ?? "error").slice(0, 300);
       else if (e.structured_output === undefined) r.error = "no structured output in the result";
       else r.output = e.structured_output;
