@@ -1,3 +1,4 @@
 node_modules
 .grade
 runs/*/work
+runs/
