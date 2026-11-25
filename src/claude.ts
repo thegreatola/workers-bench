@@ -31,6 +31,8 @@ export interface AgentSpec {
   logPath?: string;
   /** MCP servers for this agent, as Claude Code's --mcp-config JSON. Their tools must also be listed in mcpTools. */
   mcpConfig?: object;
+  /** Extra permission rules for --allowedTools, e.g. ["Bash(npm test)"]. A tool in `tools` but not covered by a rule is denied, since nothing can approve it. */
+  allowedRules?: string[];
   /** MCP tool names to allow, e.g. ["mcp__cloudflare-docs__search_cloudflare_documentation"]. */
   mcpTools?: string[];
 }
@@ -42,6 +44,8 @@ export interface AgentResult {
   inputTokens: number;
   outputTokens: number;
   toolCalls: { name: string; input: unknown }[];
+  /** Tool calls Claude Code refused for lack of permission. */
+  denied?: number;
   error?: string;
 }
 
@@ -69,7 +73,8 @@ export class ClaudeCodeRunner implements AgentRunner {
         "--output-format", "stream-json",
         "--verbose",
       ];
-      const allowed = [...spec.tools, ...(spec.mcpTools ?? [])].join(",");
+      const ruled = new Set((spec.allowedRules ?? []).map((r) => r.replace(/\(.*$/, "")));
+      const allowed = [...spec.tools.filter((t) => !ruled.has(t)), ...(spec.allowedRules ?? []), ...(spec.mcpTools ?? [])].join(",");
       if (allowed) args.push("--allowedTools", allowed);
       if (spec.mcpConfig) args.push("--mcp-config", JSON.stringify(spec.mcpConfig));
       const { stdout, stderr, code } = await runProcess(BIN(), args, cwd, spec.timeoutMs ?? 300_000);
@@ -107,6 +112,7 @@ export function parseStream(stdout: string): AgentResult & { tools: string[] } {
       r.costUsd = e.total_cost_usd ?? 0;
       r.inputTokens = (e.usage?.input_tokens ?? 0) + (e.usage?.cache_read_input_tokens ?? 0) + (e.usage?.cache_creation_input_tokens ?? 0);
       r.outputTokens = e.usage?.output_tokens ?? 0;
+      r.denied = Array.isArray(e.permission_denials) ? e.permission_denials.length : 0;
       if (e.is_error) r.error = String(e.result ?? e.subtype ?? "error").slice(0, 300);
       else if (e.structured_output === undefined) r.error = "no structured output in the result";
       else r.output = e.structured_output;

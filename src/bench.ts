@@ -6,27 +6,35 @@
  * One attempt = one model, one condition, one task:
  *   1. A fresh workspace in the system temp folder holds TASK.md, wrangler.jsonc
  *      and a stub src/index.ts. The hidden tests are never in it.
- *   2. Claude Code, headless, writes src/index.ts with file tools only. It can't
- *      run code, so this measures writing a Worker right the first time.
+ *   2. Claude Code, headless, writes src/index.ts with file tools only.
  *      Condition "docs" also gives it Cloudflare's documentation search.
+ *      Condition "run" lets it write its own tests and run them with `npm test`
+ *      in workerd; Bash is allowed for that one command and nothing else.
+ *      The "fix-" conditions start from the task's naive.ts, a plausible but
+ *      buggy Worker, and ask the agent to find and fix the bugs.
  *   3. The file is graded against the hidden tests inside workerd.
  * Everything lands in runs/<run id>/: the code, the agent's trace, and results.json.
  */
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ClaudeCodeRunner, type AgentRunner, type AgentSpec } from "./claude.js";
 import { copyTaskFiles, grade, ROOT, TASKS, type Grade } from "./grade.js";
 
 export const CONDITIONS = {
-  none: { label: "no docs", docs: false },
-  docs: { label: "Cloudflare docs search", docs: true },
+  none: { label: "no docs", docs: false, run: false, fix: false },
+  docs: { label: "Cloudflare docs search", docs: true, run: false, fix: false },
+  run: { label: "can run its own tests", docs: false, run: true, fix: false },
+  "fix-none": { label: "fix a buggy Worker, can't run code", docs: false, run: false, fix: true },
+  "fix-run": { label: "fix a buggy Worker, can run its own tests", docs: false, run: true, fix: true },
 } as const;
 export type Condition = keyof typeof CONDITIONS;
 
 const DOCS_MCP = { mcpServers: { "cloudflare-docs": { type: "http", url: "https://docs.mcp.cloudflare.com/mcp" } } };
 const DOCS_TOOLS = ["mcp__cloudflare-docs__search_cloudflare_documentation", "mcp__cloudflare-docs__migrate_pages_to_workers_guide"];
 const FILE_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"];
+/** Bash, limited by Claude Code's permission rules to running the workspace's tests. */
+export const RUN_ALLOWED = ["Bash(npm test)", "Bash(npm test:*)"];
 
 const STUB = `export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -35,9 +43,44 @@ const STUB = `export default {
 };
 `;
 
-const SYSTEM = `You write Cloudflare Workers in TypeScript (ES module syntax).
-The task is in TASK.md and the Worker's bindings are in wrangler.jsonc. Write the complete Worker in src/index.ts: every handler, and every class the bindings name, exported from that one file. You can't run, build or test code here, so get it right by reading carefully. When src/index.ts is finished, reply with one sentence saying what you built.`;
+const BASE = `You write Cloudflare Workers in TypeScript (ES module syntax).
+The task is in TASK.md and the Worker's bindings are in wrangler.jsonc. The complete Worker lives in src/index.ts: every handler, and every class the bindings name, exported from that one file.`;
+const NO_RUN = `\nYou can't run, build or test code here, so get it right by reading carefully.`;
+const RUN = `\nYou can test your work: write Vitest tests in test/*.test.ts and run them with \`npm test\`, which runs them inside workerd, the Workers runtime, with the bindings from wrangler.jsonc. test/example.test.ts shows how a test calls the Worker. Bash is limited to \`npm test\`.`;
+const WRITE_TASK = `\nWrite src/index.ts. When it is finished, reply with one sentence saying what you built.`;
+const FIX_TASK = `\nsrc/index.ts was written for TASK.md, but users report that it doesn't always do what TASK.md says. Find and fix every bug, keeping what already works. When it is fixed, reply with one sentence saying what was wrong.`;
 const DOCS_NOTE = `\nYou can search Cloudflare's developer documentation with the search_cloudflare_documentation tool.`;
+
+export function systemPrompt(c: Condition): string {
+  const k = CONDITIONS[c];
+  return BASE + (k.run ? RUN : NO_RUN) + (k.fix ? FIX_TASK : WRITE_TASK) + (k.docs ? DOCS_NOTE : "");
+}
+
+const EXAMPLE_TEST = `import { exports, env } from "cloudflare:workers";
+import { it, expect } from "vitest";
+
+// exports.default is this Worker; env holds the bindings from wrangler.jsonc.
+it("answers a request", async () => {
+  const res = await exports.default.fetch(new Request("http://example.test/"));
+  expect(res.status).toBeGreaterThan(0);
+});
+`;
+const VITEST_CONFIG = `import { cloudflareTest } from "@cloudflare/vitest-plugin";
+import { defineConfig } from "vitest/config";
+export default defineConfig({
+  plugins: [cloudflareTest({ wrangler: { configPath: "./wrangler.jsonc" } })],
+  test: { testTimeout: 20000 },
+});
+`;
+
+/** What a "run" workspace adds: the test runner, a config, an example test, and the repo's node_modules. */
+async function addTestHarness(work: string): Promise<void> {
+  await mkdir(path.join(work, "test"));
+  await writeFile(path.join(work, "test", "example.test.ts"), EXAMPLE_TEST);
+  await writeFile(path.join(work, "vitest.config.ts"), VITEST_CONFIG);
+  await writeFile(path.join(work, "package.json"), JSON.stringify({ name: "task", private: true, type: "module", scripts: { test: "vitest run" } }, null, 2) + "\n");
+  await symlink(path.join(ROOT, "node_modules"), path.join(work, "node_modules"), "dir");
+}
 
 const SCHEMA = { type: "object", properties: { summary: { type: "string" } }, required: ["summary"], additionalProperties: false };
 
@@ -49,11 +92,20 @@ export interface Attempt extends Grade {
   inputTokens: number;
   outputTokens: number;
   docSearches: number;
+  /** Times the agent ran `npm test` (conditions that allow it). */
+  testRuns: number;
+  /** Bash commands Claude Code refused (anything other than npm test). */
+  blockedCommands: number;
   agentError?: string;
 }
 
 export async function listTasks(filter: string[] = []): Promise<string[]> {
   return (await readdir(TASKS)).filter((t) => !filter.length || filter.some((f) => t.startsWith(f))).sort();
+}
+
+/** Tasks that ship a naive.ts, the starting point for the "fix-" conditions. */
+export async function hasNaive(task: string): Promise<boolean> {
+  return readFile(path.join(TASKS, task, "naive.ts"), "utf8").then(() => true, () => false);
 }
 
 export async function attempt(runner: AgentRunner, runDir: string, task: string, model: string, condition: Condition): Promise<Attempt> {
@@ -65,16 +117,20 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
     await cp(path.join(TASKS, task, "task.md"), path.join(work, "TASK.md"));
     await cp(path.join(TASKS, task, "wrangler.jsonc"), path.join(work, "wrangler.jsonc"));
     await copyTaskFiles(task, work);
-    await writeFile(path.join(work, "src", "index.ts"), STUB);
+    const k = CONDITIONS[condition];
+    const start = k.fix ? await readFile(path.join(TASKS, task, "naive.ts"), "utf8") : STUB;
+    await writeFile(path.join(work, "src", "index.ts"), start);
+    if (k.run) await addTestHarness(work);
 
-    const docs = CONDITIONS[condition].docs;
+    const docs = k.docs;
     const spec: AgentSpec = {
       name: `${model}/${condition}/${task}`,
-      prompt: "Do the task in TASK.md.",
-      systemPrompt: SYSTEM + (docs ? DOCS_NOTE : ""),
+      prompt: k.fix ? "Fix src/index.ts so it does what TASK.md says." : "Do the task in TASK.md.",
+      systemPrompt: systemPrompt(condition),
       model,
       schema: SCHEMA,
-      tools: FILE_TOOLS,
+      tools: k.run ? [...FILE_TOOLS, "Bash"] : FILE_TOOLS,
+      ...(k.run ? { allowedRules: RUN_ALLOWED } : {}),
       cwd: work,
       timeoutMs: 600_000,
       logPath: path.join(out, "trace.jsonl"),
@@ -84,7 +140,7 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
     const code = await readFile(path.join(work, "src", "index.ts"), "utf8");
     await writeFile(path.join(out, "index.ts"), code);
 
-    const g: Grade = r.error && code === STUB
+    const g: Grade = r.error && code === start && !k.fix
       ? { task, passed: 0, total: 0, solved: false, cases: [], error: "the agent wrote no code" }
       : await grade(task, code, gradeDir(out));
     const result: Attempt = {
@@ -96,6 +152,8 @@ export async function attempt(runner: AgentRunner, runDir: string, task: string,
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
       docSearches: r.toolCalls.filter((c) => c.name.startsWith("mcp__cloudflare-docs__")).length,
+      testRuns: r.toolCalls.filter((c) => c.name === "Bash" && /^\s*npm test\b/.test(String((c.input as any)?.command ?? ""))).length,
+      blockedCommands: r.denied ?? 0,
       ...(r.error ? { agentError: r.error } : {}),
     };
     await writeFile(path.join(out, "result.json"), JSON.stringify(result, null, 2) + "\n");
@@ -135,12 +193,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const conditions = list(arg("conditions", "none,docs")) as Condition[];
   for (const c of conditions) if (!(c in CONDITIONS)) throw new Error(`unknown condition ${c}; use ${Object.keys(CONDITIONS).join(", ")}`);
   const tasks = await listTasks(list(arg("tasks", "")));
+  const fixable = new Set((await Promise.all(tasks.map(async (t) => ((await hasNaive(t)) ? t : null)))).filter(Boolean));
   const concurrency = Number(arg("concurrency", "3"));
   const id = arg("run", new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19));
   const runDir = path.join(ROOT, "runs", id);
   await mkdir(runDir, { recursive: true });
 
-  const jobs = models.flatMap((m) => conditions.flatMap((c) => tasks.map((t) => ({ m, c, t }))));
+  const jobs = models.flatMap((m) => conditions.flatMap((c) => tasks.filter((t) => !CONDITIONS[c].fix || fixable.has(t)).map((t) => ({ m, c, t }))));
   console.log(`run ${id}: ${jobs.length} attempts (${models.join(", ")} x ${conditions.join(", ")} x ${tasks.length} tasks), ${concurrency} at a time`);
   const runner = new ClaudeCodeRunner();
   let done = 0;
@@ -150,7 +209,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (a.error === "the agent wrote no code" && /not logged in/i.test(a.agentError ?? "")) a = await attempt(runner, runDir, t, m, c);
     done++;
     const mark = a.solved ? "pass" : a.error || a.agentError ? "ERR " : "fail";
-    console.log(`[${String(done).padStart(3)}/${jobs.length}] ${mark} ${m.padEnd(7)} ${c.padEnd(5)} ${t.padEnd(18)} ${a.passed}/${a.total}  ${(a.durationMs / 1000).toFixed(0)}s${a.docSearches ? `  ${a.docSearches} doc searches` : ""}${a.agentError ? `  agent: ${a.agentError.slice(0, 80)}` : a.error ? `  ${a.error.split("\n")[0].slice(0, 80)}` : ""}`);
+    console.log(`[${String(done).padStart(3)}/${jobs.length}] ${mark} ${m.padEnd(7)} ${c.padEnd(8)} ${t.padEnd(18)} ${a.passed}/${a.total}  ${(a.durationMs / 1000).toFixed(0)}s${a.docSearches ? `  ${a.docSearches} doc searches` : ""}${a.testRuns ? `  ${a.testRuns} test runs` : ""}${a.blockedCommands ? `  ${a.blockedCommands} commands blocked` : ""}${a.agentError ? `  agent: ${a.agentError.slice(0, 80)}` : a.error ? `  ${a.error.split("\n")[0].slice(0, 80)}` : ""}`);
     return a;
   });
   await writeFile(path.join(runDir, "results.json"), JSON.stringify({ id, models, conditions, tasks, attempts }, null, 2) + "\n");

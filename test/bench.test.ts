@@ -2,7 +2,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { attempt, pool } from "../src/bench.js";
+import { attempt, pool, systemPrompt } from "../src/bench.js";
 import type { AgentResult, AgentRunner, AgentSpec } from "../src/claude.js";
 import { TASKS } from "../src/grade.js";
 import { markdown, median, summarize } from "../src/report.js";
@@ -59,8 +59,40 @@ describe("attempt", () => {
   });
 });
 
+describe("run and fix conditions", () => {
+  it("run: the workspace can test itself, and Bash is limited to npm test", async () => {
+    const r = new FakeRunner(null, "skip");
+    let files: string[] = [];
+    const orig = r.run.bind(r);
+    r.run = async (spec) => {
+      const { readdir } = await import("node:fs/promises");
+      files = (await readdir(spec.cwd!)).map(String).sort();
+      return orig(spec);
+    };
+    await attempt(r, await mkdtemp(path.join(os.tmpdir(), "wb-test-")), "01-json-methods", "fake", "run");
+    expect(files).toEqual(["TASK.md", "node_modules", "package.json", "src", "test", "vitest.config.ts", "wrangler.jsonc"]);
+    expect(r.seen[0].tools).toContain("Bash");
+    expect(r.seen[0].allowedRules).toEqual(["Bash(npm test)", "Bash(npm test:*)"]);
+    expect(systemPrompt("run")).toContain("npm test");
+    expect(systemPrompt("none")).toContain("can't run");
+  });
+  it("fix: starts from the task's naive.ts", async () => {
+    let start = "";
+    const r = new FakeRunner(null, "skip");
+    const orig = r.run.bind(r);
+    r.run = async (spec) => { start = await readFile(path.join(spec.cwd!, "src", "index.ts"), "utf8"); return orig(spec); };
+    const a = await attempt(r, await mkdtemp(path.join(os.tmpdir(), "wb-test-")), "29-d1-transfer", "fake", "fix-none");
+    expect(start).toBe(await readFile(path.join(TASKS, "29-d1-transfer", "naive.ts"), "utf8"));
+    expect(r.seen[0].tools).not.toContain("Bash");
+    expect(systemPrompt("fix-none")).toContain("Find and fix every bug");
+    // Untouched naive code is graded as it is, and fails.
+    expect(a.solved).toBe(false);
+    expect(a.passed).toBeGreaterThan(0);
+  });
+});
+
 describe("report", () => {
-  const base = { durationMs: 10_000, costUsd: 0, inputTokens: 0, outputTokens: 0, docSearches: 0, cases: [] };
+  const base = { durationMs: 10_000, costUsd: 0, inputTokens: 0, outputTokens: 0, docSearches: 0, testRuns: 0, blockedCommands: 0, cases: [] };
   const attempts = [
     { ...base, task: "a", model: "m1", condition: "none" as const, passed: 3, total: 3, solved: true },
     { ...base, task: "b", model: "m1", condition: "none" as const, passed: 1, total: 4, solved: false },

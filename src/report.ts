@@ -21,6 +21,7 @@ export interface Row {
   tests: number;
   medianSeconds: number;
   docSearches: number;
+  testRuns: number;
   errors: number;
 }
 
@@ -39,6 +40,7 @@ export function summarize(attempts: Attempt[]): Row[] {
     tests: as.reduce((n, a) => n + a.total, 0),
     medianSeconds: median(as.map((a) => a.durationMs / 1000)),
     docSearches: as.reduce((n, a) => n + a.docSearches, 0),
+    testRuns: as.reduce((n, a) => n + (a.testRuns ?? 0), 0),
     errors: as.filter((a) => a.agentError || a.error).length,
   }));
   return rows.sort((a, b) => b.solved - a.solved || b.testsPassed - a.testsPassed || a.model.localeCompare(b.model) || a.condition.localeCompare(b.condition));
@@ -56,19 +58,19 @@ export function markdown(id: string, attempts: Attempt[], totals: Map<string, nu
   const lines = [
     `# workers-bench run ${id}`,
     "",
-    "| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches |",
-    "|---|---|---|---|---|---|",
+    "| Model | Condition | Tasks solved | Tests passed | Median time | Doc searches | Test runs |",
+    "|---|---|---|---|---|---|---|",
     ...rows.map((r) => {
       // An attempt whose code never loaded reports 0 tests, so count against the task's real total.
       const tests = attempts.filter((a) => a.model === r.model && a.condition === r.condition).reduce((n, a) => n + (totals.get(a.task) ?? a.total), 0);
-      return `| ${r.model} | ${CONDITIONS[r.condition].label} | ${r.solved}/${r.tasks} | ${r.testsPassed}/${tests} | ${r.medianSeconds.toFixed(0)} s | ${CONDITIONS[r.condition].docs ? r.docSearches : "–"} |`;
+      return `| ${r.model} | ${CONDITIONS[r.condition].label} | ${r.solved}/${r.tasks} | ${r.testsPassed}/${tests} | ${r.medianSeconds.toFixed(0)} s | ${CONDITIONS[r.condition].docs ? r.docSearches : "–"} | ${CONDITIONS[r.condition].run ? r.testRuns : "–"} |`;
     }),
     "",
     "## By task",
     "",
   ];
   const cols = rows.map((r) => [r.model, r.condition] as const);
-  lines.push(`| Task | ${cols.map(([m, c]) => `${m}, ${CONDITIONS[c].docs ? "docs" : "no docs"}`).join(" | ")} |`);
+  lines.push(`| Task | ${cols.map(([m, c]) => `${m}, ${c}`).join(" | ")} |`);
   lines.push(`|---|${cols.map(() => "---").join("|")}|`);
   for (const task of [...new Set(attempts.map((a) => a.task))].sort()) {
     const cells = cols.map(([m, c]) => {
