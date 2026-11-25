@@ -17,7 +17,7 @@ Each row must have:
 
 The import is all-or-nothing:
 - If every row is valid, insert or update every product and return 200 with `{"imported": <rows>}`.
-- If any row is invalid, change nothing and return 422 with `{"errors": [{"line": <n>, "error": "<reason>"}, ...]}`, listing every invalid row. `line` is the row's line number in the file, counting the header as line 1. A quoted field that spans lines counts as one line, at the line where its row starts. A repeated `sku` is an error on its later row.
+- If any row is invalid, change nothing and return 422 with `{"errors": [{"line": <n>, "error": "<reason>"}, ...]}`, listing every invalid row. `line` is the physical line of the file where the row begins, counting the header as line 1. Line breaks inside quoted fields still count: if a row's quoted field spans two lines, the next row begins two lines later. A repeated `sku` is an error on its later row.
 
 ## Read
 

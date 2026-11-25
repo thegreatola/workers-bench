@@ -9,17 +9,18 @@ const stats = async (slug: string) => { const r = await f(`/api/links/${slug}/st
 
 /** A batch whose acks are recorded, like the one the queue hands the consumer. */
 async function consume(bodies: unknown[]) {
+  // Returning without error acknowledges the whole batch, so explicit acks are optional; a retry is a failure.
   const acked = new Set<string>();
-  let all = false;
+  let all = false, retried = false;
   const batch = {
     queue: "clicks",
-    messages: bodies.map((body, i) => ({ id: `c${i}`, timestamp: new Date(), attempts: 1, body, ack: () => acked.add(`c${i}`), retry: () => {} })),
-    ackAll: () => { all = true; }, retryAll: () => {},
+    messages: bodies.map((body, i) => ({ id: `c${i}`, timestamp: new Date(), attempts: 1, body, ack: () => acked.add(`c${i}`), retry: () => { retried = true; } })),
+    ackAll: () => { all = true; }, retryAll: () => { retried = true; },
   };
   const ctx = createExecutionContext();
   await (worker as any).queue(batch, env, ctx);
   await waitOnExecutionContext(ctx);
-  return all || acked.size === bodies.length;
+  return !retried && (all || acked.size === 0 || acked.size === bodies.length);
 }
 
 it("creates a custom slug and redirects", async () => {
