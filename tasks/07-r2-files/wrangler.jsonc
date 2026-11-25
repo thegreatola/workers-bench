@@ -1,0 +1,2 @@
+{ "name": "task", "main": "src/index.ts", "compatibility_date": "2026-11-01",
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "files" }] }
